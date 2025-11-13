@@ -1,0 +1,23 @@
+{
+  "name": "p5-collaborative-drawing",
+  "version": "1.0.0",
+  "description": "Collaborative drawing canvas using p5.js and Socket.IO",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "p5.js",
+    "socket.io",
+    "collaborative",
+    "drawing",
+    "realtime",
+    "canvas"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.15.3",
+    "socket.io": "^2.0.3"
+  }
+}

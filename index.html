@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>p5.js Collaborative Drawing</title>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      #info {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+        z-index: 1000;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="info">
+      Draw with your mouse! Other users appear in red.<br />
+      Open in multiple tabs to test multiplayer.
+    </div>
+
+    <!-- Load p5.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+
+    <!-- Load Socket.IO client from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.js"></script>
+
+    <!-- p5.js sketch -->
+    <script>
+      // Connect to the Socket.IO server (auto-connects to current origin)
+      var socket = io();
+      let name = "Blob";
+      function setup() {
+        createCanvas(windowWidth, windowHeight);
+        background(255);
+
+        // Listen for drawing events from other users
+        socket.on("iamdrawing", someoneIsDrawing);
+
+        // Listen for new user join notifications
+        socket.on("hello!", someoneJoined);
+
+        name = prompt("Name for your blob?");
+        // player.debug = true;
+        if (name == null || name == "") {
+          name = "Blob";
+        }
+        // Announce our presence to the server
+        socket.emit("hello!", name);
+      }
+
+      function draw() {
+        // Only draw when mouse is pressed and moving
+        if (mouseIsPressed && (mouseX !== pmouseX || mouseY !== pmouseY)) {
+          // Draw locally (dark gray)
+          noStroke();
+          fill(30, 30, 30, 90);
+          var radius =
+            Math.abs(mouseX - pmouseX) / 3 + Math.abs(mouseY - pmouseY) / 3;
+          ellipse(mouseX, mouseY, radius, radius);
+
+          // Send drawing data to server
+          socket.emit("iamdrawing", mouseX, mouseY, radius, name);
+        }
+      }
+
+      // This function is called when another user draws
+      function someoneIsDrawing(x, y, r, name) {
+        noStroke();
+        fill(255, 0, 0, 90); // Red for other users
+        ellipse(x, y, r, r);
+        text(name, x, y);
+      }
+
+      // This function is called when a new user joins
+      function someoneJoined() {
+        console.log("New user joined!");
+      }
+
+      // Resize canvas when window is resized
+      function windowResized() {
+        resizeCanvas(windowWidth, windowHeight);
+      }
+    </script>
+  </body>
+</html>
