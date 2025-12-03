@@ -3,18 +3,30 @@
 const express = require("express");
 const socketIO = require("socket.io");
 const path = require("path");
+//const p5 = require("p5");
 
 const PORT = process.env.PORT || 3000;
 const INDEX = path.join(__dirname, "index.html");
+let FRAME_RATE = 60;
+let FRAME_TIME = 1000 / FRAME_RATE;
+let lastFrameTime = Date.now();
 
 const server = express()
   .use((req, res) => res.sendFile(INDEX))
   .listen(PORT, () => console.log(`Listening on ${PORT}`));
 
 const io = socketIO(server);
-
+let players = {};  // Store player data
 // Track connected users
 let userCount = 0;
+let isHost = null; // Track the host player
+
+let ballData = {
+    x: 400,
+    y: 300,
+    vx: 3,
+    vy: 0
+}; // Initial ball data
 let playerObjects = []; // Array to hold all player objects
 
 //when client connects to the server
