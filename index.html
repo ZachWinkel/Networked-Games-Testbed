@@ -99,12 +99,13 @@
         World.add(world, player);
 
         // Create paddle
+        //note: try to get paddle to not overlap maybe?
         paddle = Bodies.rectangle(
           player.position.x,
           player.position.y - 30,
           90,
           15,
-          { isStatic: true }
+          { isStatic: true  }
         );
         World.add(world, paddle);
 
@@ -129,8 +130,9 @@
         World.add(world, [floor, roof, wall1, wall2, goal]);
 
         // Matter.js engine run
-        Engine.run(engine);
-      } //end of setup
+          Matter.Runner.run(engine)   
+
+} //end of setup
 
       function draw() {
         background(100);
