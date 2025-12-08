@@ -83,6 +83,7 @@
 
       function preload() {
         // Try to load goal sound, but don't break if it fails
+        // Note need to fix sound, Dont think I imported it right, but game works without it with the catch
         try {
           goalSound = createAudio('Sounds/video-game-bonus-323603.mp3');
         } catch (e) {
@@ -92,7 +93,7 @@
 
       socket.on('connect', () => { 
         playerId = socket.id;
-        // Generate random colors for the local player after connection
+        // Generate random colors for the player after connection
         playerColors[playerId] = {
           bodyColor: color(random(50, 200), random(50, 200), random(50, 200)),
           paddleColor: color(random(50, 200), random(50, 200), random(50, 200))
@@ -263,7 +264,7 @@
           moveDir = 1;
         }
         
-        // Update player position locally for immediate feedback
+        // Update player position locally
         if (moveDir !== 0) {
           const newX = player.position.x + moveDir * 3;
           // Clamp to canvas bounds
@@ -283,6 +284,7 @@
         const dt = typeof deltaTime !== 'undefined' ? deltaTime : 16.6667;
         const frameScale = dt / 16.6667;
         const ROT_SPEED = 0.12; // radians per frame at 60fps
+
         // initialize paddleAngle if missing
         if (typeof paddleAngle === 'undefined') {
           paddleAngle = paddle.angle || 0;
@@ -292,6 +294,7 @@
         } else if (keyIsDown(69)) { // E
           paddleAngle += ROT_SPEED * frameScale;
         }
+
         // Clamp angle limits to avoid flipping too far
         paddleAngle = Math.max(MIN_PADDLE_ANGLE, Math.min(MAX_PADDLE_ANGLE, paddleAngle));
 
@@ -443,7 +446,7 @@
         // Update local score if it exists for this player
         if (scoresData[playerId] !== undefined) {
           score = scoresData[playerId];
-          // Try to play goal sound (gracefully fail if not available)
+          // Try to play goal sound (dont fully fail if not available)
           if (goalSound) {
             try {
               goalSound.play();

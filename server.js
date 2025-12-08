@@ -43,7 +43,6 @@ let players = {};
 let scores = {}; // Track player scores
 let combos = {}; // Track combo count per player
 let lastPaddleHit = null; // Track who last hit the ball with their paddle
-let isHost = null;
 let paddleHitCooldown = {}; // Cooldown per paddle to prevent multiple hits in one contact
 
 // Helper function to get randomized spawn velocity
@@ -276,25 +275,5 @@ io.on('connection', (socket) => {
     delete scores[socket.id];
     delete combos[socket.id];        // Notify other players that this player has disconnected
         socket.broadcast.emit('playerDisconnected', socket.id);
-
-        // Re-assign the host if needed
-        if (socket.id === isHost) {
-            setNewHost();
-        }
     });
-
-    // Set a new host if needed
-    function setNewHost() {
-        if (Object.keys(players).length > 0) {
-            isHost = Object.keys(players)[0];  // Set the first player as the new host
-            io.emit('hostChanged', isHost);    // Notify all clients of the host change
-        } else {
-            isHost = null;
-        }
-    }
-    
-    // Set the initial host if no host exists
-    if (!isHost) {
-        setNewHost();
-    }
 });
