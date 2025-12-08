@@ -61,21 +61,84 @@ let ballData = {
     vy: ballState.vy
 };
 
+// Goal position tracking
+let goalY = 250; // Initial goal Y position
+
+function randomizeGoalY() {
+  // Randomize goal Y between 150 and 350 (keeping it within bounds and reasonably centered)
+  goalY = 150 + Math.random() * 200;
+}
+
+// Detect paddle collision for a single player and reflect the ball using paddle angle
+function handlePaddleCollision(playerId, playerData) {
+  if (!playerData) return;
+  const paddleX = playerData.x;
+  const paddleY = playerData.y - 30;
+  const paddleW = 90;
+  const paddleH = 15;
+  const paddleRotation = playerData.paddleRotation || 0;
+
+  const cos_r = Math.cos(paddleRotation);
+  const sin_r = Math.sin(paddleRotation);
+
+  const dx = ballState.x - paddleX;
+  const dy = ballState.y - paddleY;
+
+  const localX = dx * cos_r + dy * sin_r;
+  const localY = -dx * sin_r + dy * cos_r;
+
+  const collisionMargin = 10;
+  if (Math.abs(localX) < paddleW / 2 + BALLRADIUS + collisionMargin &&
+      Math.abs(localY) < paddleH / 2 + BALLRADIUS + collisionMargin) {
+
+    const restitution = 0.78;
+
+    // Normal points outward from paddle surface (upward when angle = 0)
+    const nx = sin_r;
+    const ny = -cos_r;
+    const vDotN = ballState.vx * nx + ballState.vy * ny;
+    if (vDotN < 0) {
+      ballState.vx = ballState.vx - (1 + restitution) * vDotN * nx;
+      ballState.vy = ballState.vy - (1 + restitution) * vDotN * ny;
+    } else {
+      // If overlapping but moving away, still give a small push along the normal
+      const nudge = 0.6;
+      ballState.vx += nx * nudge;
+      ballState.vy += ny * nudge;
+    }
+    const overlapY = (paddleH / 2 + BALLRADIUS + collisionMargin) - Math.abs(localY);
+    if (overlapY > 0) {
+      const dir = localY >= 0 ? 1 : -1;
+      const correction = (overlapY + 1) * dir;
+      ballState.x += nx * correction;
+      ballState.y += ny * correction;
+    }
+    lastPaddleHit = playerId;
+  }
+}
+
 // Game loop: simple manual physics
 const gameLoopInterval = setInterval(() => {
-  // Use sub-stepping for collision detection (4 steps per frame)
-  const substeps = 4;
-  const substepVx = ballState.vx / substeps;
-  const substepVy = ballState.vy / substeps;
-  const gravityPerStep = 0.2 / substeps; // Reduced gravity - distribute across substeps
+  // Use sub-stepping for collision detection (6 steps per fram
+  // e)
+  const substeps = 6;
+  const gravityTotal = 0.17; // overall gravity per frame (a bit faster fall)
+  const gravityPerStep = gravityTotal / substeps;
+  const airDrag = 0.996; // mild damping to smooth jank while keeping bounce snappy
+  const maxSpeed = 11; // cap to avoid tunneling and runaway speed
   
   for (let i = 0; i < substeps; i++) {
     // Apply gravity for this substep
     ballState.vy += gravityPerStep;
     
     // Update position
-    ballState.x += substepVx;
-    ballState.y += substepVy;
+    ballState.x += ballState.vx / substeps;
+    ballState.y += ballState.vy / substeps;
+
+    // Paddle collisions for all players using latest server-side paddle angles/positions
+    for (const pid in players) {
+      handlePaddleCollision(pid, players[pid]);
+    }
     
     // Wall bounces (with damping)
     if (ballState.x - BALLRADIUS < 0) {
@@ -90,6 +153,18 @@ const gameLoopInterval = setInterval(() => {
       ballState.y = BALLRADIUS;
       ballState.vy = Math.abs(ballState.vy) * 0.6; // Bounce down with less energy
     }
+
+    // Gentle air drag to reduce jitter and excessive speed
+    ballState.vx *= airDrag;
+    ballState.vy *= airDrag;
+
+    // Clamp speed to keep simulation stable
+    const speedSq = ballState.vx * ballState.vx + ballState.vy * ballState.vy;
+    if (speedSq > maxSpeed * maxSpeed) {
+      const scale = maxSpeed / Math.sqrt(speedSq);
+      ballState.vx *= scale;
+      ballState.vy *= scale;
+    }
     
     // Floor reset (don't let it go out of bounds)
     if (ballState.y + BALLRADIUS > CANVASY) {
@@ -103,7 +178,7 @@ const gameLoopInterval = setInterval(() => {
   
   // Goal detection
   if (ballState.x > 750 && ballState.x < 800 &&
-      ballState.y > 250 && ballState.y < 350) {
+      ballState.y > goalY - 50 && ballState.y < goalY + 50) {
     if (lastPaddleHit && scores[lastPaddleHit] !== undefined) {
       scores[lastPaddleHit]++;
       console.log(`${lastPaddleHit} scored! Score: ${scores[lastPaddleHit]}`);
@@ -114,6 +189,8 @@ const gameLoopInterval = setInterval(() => {
     ballState.vx = spawnVel.vx;
     ballState.vy = spawnVel.vy;
     lastPaddleHit = null;
+    randomizeGoalY(); // Randomize goal position after each goal
+    io.emit('goalYUpdate', goalY); // Notify clients of new goal position
   }
   
   // Broadcast ball state
@@ -140,7 +217,7 @@ io.on('connection', (socket) => {
 
     // Send the initial player and ball state to the client
     // Include the receiver's socket id so the client can map its local body
-    socket.emit('initialState', { players, ballData, scores, you: socket.id });
+    socket.emit('initialState', { players, ballData, scores, goalY, you: socket.id });
 
     // Notify other players about the new player
     socket.broadcast.emit('newPlayer', players[socket.id]);
@@ -154,35 +231,6 @@ io.on('connection', (socket) => {
 
             // Broadcast the updated player info to all clients
             io.emit('playerUpdate', players[socket.id]);
-            
-            // Server-side paddle collision detection with rotation
-            const paddleX = data.x;
-            const paddleY = data.y - 30;
-            const paddleW = 90;
-            const paddleH = 15;
-            const paddleRotation = data.paddleRotation;
-            
-            // Calculate rotated paddle corners
-            const cos_r = Math.cos(paddleRotation);
-            const sin_r = Math.sin(paddleRotation);
-            
-            // Distance from ball to paddle center
-            const dx = ballState.x - paddleX;
-            const dy = ballState.y - paddleY;
-            
-            // Rotate ball position relative to paddle (to test AABB collision in paddle space)
-            const localX = dx * cos_r + dy * sin_r;
-            const localY = -dx * sin_r + dy * cos_r;
-            
-            // AABB collision in paddle-local space (with margin for accuracy)
-            const collisionMargin = 8;
-            if (Math.abs(localX) < paddleW / 2 + BALLRADIUS + collisionMargin &&
-                Math.abs(localY) < paddleH / 2 + BALLRADIUS + collisionMargin) {
-                // When collision detected - bounce ball upward with stronger force on paddle hit
-                ballState.vy = -Math.abs(ballState.vy) * 0.8 - 1;
-                ballState.vx = ballState.vx * 0.75;
-                lastPaddleHit = socket.id;
-            }
         }
     });
 

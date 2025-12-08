@@ -47,6 +47,9 @@
     <!-- Load p5.js from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
 
+    <!-- Load p5.sound library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/addons/p5.sound.min.js"></script>
+
     <!-- Load Socket.IO client from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.3/socket.io.js"></script>
     <!-- Load Matter.js from CDN -->
@@ -60,15 +63,23 @@
       const { Engine, World, Bodies, Body, Events, Constraint } = Matter;
       let engine, world;
       let ball, player, paddle, paddleConstraint, floor, roof, wall1, wall2, goal;
+      let goalSound; // Sound for goal scoring
       //other vars/constants
       let score = 0;
       const CANVASX = 800;
       const CANVASY = 500;
+      let goalY = 250; // Track goal Y position
       let players = {}; // Store other players
       let playerId = null;
-      socket.on('connect', () => { playerId = socket.id; });
-      let RandomColor1;
-      let RandomColor2;
+      socket.on('connect', () => { 
+        playerId = socket.id;
+        // Generate random colors for the local player after connection
+        playerColors[playerId] = {
+          bodyColor: color(random(50, 200), random(50, 200), random(50, 200)),
+          paddleColor: color(random(50, 200), random(50, 200), random(50, 200))
+        };
+      });
+      let playerColors = {}; // Map player ID to {bodyColor, paddleColor}
 
       // Ball data from server (not a Matter.js body)
       let ballData = { x: 400, y: 250, vx: 5, vy: 2 };
@@ -78,6 +89,16 @@
       const MIN_PADDLE_ANGLE = -1.2;
       const MAX_PADDLE_ANGLE = 1.2;
 
+      function preload() {
+        // Try to load goal sound, but don't break if it fails
+        goalSound = null; // Initialize as null
+        try {
+          goalSound = createAudio('Sounds/video-game-bonus-323603.mp3');
+        } catch (e) {
+          console.log('Sound loading failed - game will continue without sound');
+        }
+      }
+
       function setup() {
         const container = document.getElementById('p5-container');
         const canvas = createCanvas(CANVASX, CANVASY);
@@ -86,8 +107,6 @@
         // Initialize Matter.js Engine and World
         engine = Engine.create();
         world = engine.world;
-        RandomColor1 = (random(), random(0, 255), random(0, 255));
-        RandomColor2 = (random(), random(), random());
         //world.gravity.y = 10; // Set gravity
 
         // Create ball
@@ -102,7 +121,9 @@
           isStatic: false,
           inertia: Infinity, // Prevent rotation from collisions
         });
-        player.collisionFilter.group = -1; 
+        // Set collision filter: category 1, collide only with floor (category 64)
+        player.collisionFilter.category = 1;
+        player.collisionFilter.mask = 64;
         World.add(world, player);
 
         // Create paddle as a dynamic body and attach it to the player with a constraint
@@ -114,7 +135,9 @@
           { isStatic: false, frictionAir: 0.05 }
           
         );
-        paddle.collisionFilter.group = -1; 
+        // Set collision filter: category 2, collide only with floor (category 64)
+        paddle.collisionFilter.category = 2;
+        paddle.collisionFilter.mask = 64; 
         World.add(world, paddle);
 
         // Create static walls
@@ -122,6 +145,9 @@
         floor = Bodies.rectangle(CANVASX / 2, CANVASY, CANVASX, 5, {
           isStatic: true,
         });
+        // Set collision filter for floor: category 64, collides with players (1, 2) and ball
+        floor.collisionFilter.category = 64;
+        floor.collisionFilter.mask = 1 | 2 | 4; // collide with player, paddle, and remote players
         roof = Bodies.rectangle(CANVASX / 2, 0, CANVASX, 5, { isStatic: true });
         wall1 = Bodies.rectangle(0, CANVASY / 2, 20, CANVASY, {
           isStatic: true,
@@ -146,7 +172,17 @@
         if (players[id]) return;
         const p = Bodies.circle(data.x || 100, data.y || 465, 25, { isStatic: true });
         const pad = Bodies.rectangle((data.x || 100), (data.y || 465) - 30, 90, 15, { isStatic: true });
+        // Set collision filters to not collide with anything except floor
+        p.collisionFilter.category = 4;
+        p.collisionFilter.mask = 64;
+        pad.collisionFilter.category = 8;
+        pad.collisionFilter.mask = 64;
         World.add(world, [p, pad]);
+        // Generate random colors for this remote player
+        playerColors[id] = {
+          bodyColor: color(random(50, 200), random(50, 200), random(50, 200)),
+          paddleColor: color(random(50, 200), random(50, 200), random(50, 200))
+        };
         players[id] = { body: p, paddle: pad };
       }
 
@@ -163,13 +199,16 @@
         if (data.you) {
           playerId = data.you;
         }
-        if (data.players) {
+        if (data.goalY !== undefined) {
+          goalY = data.goalY;
+        }
+        if (data.players && player) {
           Object.keys(data.players).forEach((id) => {
             const pd = data.players[id];
-            if (id === playerId) {
+            if (id === playerId && player && player.position) {
               // sync our local player to server position
               Body.setPosition(player, { x: pd.x, y: pd.y });
-            } else {
+            } else if (id !== playerId) {
               createRemotePlayer(id, pd);
             }
           });
@@ -210,9 +249,9 @@
         fill(100);
         rect(0, 0, CANVASX, 10);
         
-        // Draw goal zone (right side)
+        // Draw goal zone (right side) - dynamically positioned
         fill(50, 200, 50, 100);
-        rect(750, 250, 50, 100);
+        rect(750, goalY - 50, 50, 100);
 
         // Handle player movement (left/right) and paddle rotation (Q/E)
         let moveDir = 0;
@@ -274,28 +313,36 @@
         noStroke(); // Reset stroke for other elements
 
         // Draw local player as a circle
-        fill(RandomColor1)
+        if (playerColors[playerId]) {
+          fill(playerColors[playerId].bodyColor);
+        }
         ellipse(player.position.x, player.position.y, 50, 50); // Draw player
         // Draw paddle with rotation applied
         push();
         translate(paddle.position.x, paddle.position.y);
         rotate(paddle.angle);
-        fill(RandomColor2); 
+        if (playerColors[playerId]) {
+          fill(playerColors[playerId].paddleColor);
+        }
         rect(-45, -8, 90, 16); // Centered rectangle, height 16
         pop();
 
         // Draw remote players and their paddles
-        fill(RandomColor1);
         Object.keys(players).forEach((id) => {
           const p = players[id];
           if (p && p.body && p.paddle) {
             // Draw remote player body as a circle
+            if (playerColors[id]) {
+              fill(playerColors[id].bodyColor);
+            }
             ellipse(p.body.position.x, p.body.position.y, 50, 50);
             // Draw remote player paddle with rotation
             push();
             translate(p.paddle.position.x, p.paddle.position.y);
             rotate(p.paddle.angle);
-            fill(RandomColor2);
+            if (playerColors[id]) {
+              fill(playerColors[id].paddleColor);
+            }
             rect(-45, -8, 90, 16); // Centered rectangle, height 16
             pop();
           }
@@ -313,13 +360,15 @@
 
       // Send player position and paddle rotation
       setInterval(() => {
-        let playerData = {
-          id: playerId,
-          x: player.position.x,
-          y: player.position.y,
-          paddleRotation: paddle.angle,
-        };
-        socket.emit("playerUpdate", playerData);
+        if (player && player.position && paddle && paddle.angle !== undefined) {
+          let playerData = {
+            id: playerId,
+            x: player.position.x,
+            y: player.position.y,
+            paddleRotation: paddle.angle,
+          };
+          socket.emit("playerUpdate", playerData);
+        }
       }, 50);
 
       // Receive updates from other players
@@ -327,7 +376,7 @@
         if (data.id !== playerId) {
           // Update other players' positions and paddles
           let other = players[data.id];
-          if (other) {
+          if (other && other.body && other.paddle) {
             Body.setPosition(other.body, { x: data.x, y: data.y });
             // Sync paddle position to stay above the remote player
             Body.setPosition(other.paddle, { x: data.x, y: data.y - 30 });
@@ -335,7 +384,7 @@
           } else {
             // If we don't have a body yet, create one
             createRemotePlayer(data.id, data);
-            if (players[data.id]) {
+            if (players[data.id] && players[data.id].body && players[data.id].paddle) {
               Body.setPosition(players[data.id].body, { x: data.x, y: data.y });
               Body.setPosition(players[data.id].paddle, { x: data.x, y: data.y - 30 });
               Body.setAngle(players[data.id].paddle, data.paddleRotation);
@@ -352,11 +401,24 @@
         ballData.vy = data.vy;
       });
 
+      // Listen for goal position updates from server
+      socket.on("goalYUpdate", (newGoalY) => {
+        goalY = newGoalY;
+      });
+
       // Receive score updates from server
       socket.on("scoresUpdate", (scoresData) => {
         // Update local score if it exists for this player
         if (scoresData[playerId] !== undefined) {
           score = scoresData[playerId];
+          // Try to play goal sound (gracefully fail if not available)
+          if (goalSound) {
+            try {
+              goalSound.play();
+            } catch (e) {
+              // Sound failed, but game continues
+            }
+          }
         }
       });
 
