@@ -48,6 +48,9 @@ let scores = {}; // Track player scores
 let combos = {}; // Track combo count per player
 let lastPaddleHit = null; // Track who last hit the ball with their paddle
 let paddleHitCooldown = {}; // Cooldown per paddle to prevent multiple hits in one contact
+let playerStates = {}; // Store recent paddle states for interpolation {playerId: [{x, y, paddleRotation, timestamp}, ...]}
+let consecutivePaddleBounces = 0; // Track consecutive bounces off paddles (for damping only first one)
+const STATE_BUFFER_SIZE = 3; // Keep last 3 updates for interpolation
 
 // Helper function to get randomized spawn velocity
 function getRandomSpawnVelocity() {
@@ -75,13 +78,47 @@ function randomizeGoalY() {
   goalY = 150 + Math.random() * 200;
 }
 
+// Interpolate paddle state based on timestamp
+function getInterpolatedPaddleState(playerId, currentTime) {
+  if (!playerStates[playerId] || playerStates[playerId].length === 0) {
+    return players[playerId]; // Fallback to latest
+  }
+  
+  const states = playerStates[playerId];
+  
+  // Find two states to interpolate between
+  let state1 = states[states.length - 1]; // Most recent
+  let state2 = states.length > 1 ? states[states.length - 2] : state1;
+  
+  // If current time is before oldest state or after newest, don't interpolate
+  if (currentTime <= state1.timestamp) {
+    return state1;
+  }
+  
+  // Linear interpolation
+  const timeDiff = state2.timestamp - state1.timestamp;
+  if (timeDiff === 0) return state1;
+  
+  const t = Math.max(0, Math.min(1, (currentTime - state1.timestamp) / timeDiff));
+  
+  return {
+    x: state1.x + (state2.x - state1.x) * t,
+    y: state1.y + (state2.y - state1.y) * t,
+    paddleRotation: state1.paddleRotation + (state2.paddleRotation - state1.paddleRotation) * t,
+  };
+}
+
 function handlePaddleCollision(playerId, playerData) {
   if (!playerData) return;
-  const paddleX = playerData.x;
-  const paddleY = playerData.y - 30;
+  
+  // Use interpolated paddle state for more accurate collision
+  const interpolatedData = getInterpolatedPaddleState(playerId, Date.now());
+  
+  const paddleX = interpolatedData.x;
+  const paddleY = interpolatedData.y - 30;
   const paddleW = 90;
   const paddleH = 15;
-  const paddleRotation = playerData.paddleRotation || 0;
+  const paddleRotation = interpolatedData.paddleRotation || 0;
 
   const cos_r = Math.cos(paddleRotation);
   const sin_r = Math.sin(paddleRotation);
@@ -92,12 +129,14 @@ function handlePaddleCollision(playerId, playerData) {
   const localX = dx * cos_r + dy * sin_r;
   const localY = -dx * sin_r + dy * cos_r;
 
-  const collisionMargin = 10;
+  const collisionMargin = 2; // Margin for rotated paddle accuracy
   const isColliding = Math.abs(localX) < paddleW / 2 + BALLRADIUS + collisionMargin &&
       Math.abs(localY) < paddleH / 2 + BALLRADIUS + collisionMargin;
   
   if (isColliding) {
-    const restitution = 0.78;
+    // Only apply damping on first consecutive bounce
+    const damping = consecutivePaddleBounces === 0 ? 0.85 : 1.0;
+    const restitution = 1.20 * damping; // Dampen only the first bounce in a consecutive series
 
     // Normal points outward from paddle surface (upward when angle = 0)
     const nx = sin_r;
@@ -112,12 +151,14 @@ function handlePaddleCollision(playerId, playerData) {
       ballState.vx += nx * nudge;
       ballState.vy += ny * nudge;
     }
-    const overlapY = (paddleH / 2 + BALLRADIUS + collisionMargin) - Math.abs(localY);
+    
+    // Positional correction: push ball out along normal to prevent overlap
+    const overlapY = (paddleH / 2 + BALLRADIUS) - Math.abs(localY);
     if (overlapY > 0) {
-      const dir = localY >= 0 ? 1 : -1;
-      const correction = (overlapY + 1) * dir;
-      ballState.x += nx * correction;
-      ballState.y += ny * correction;
+      // Push ball out along the normal vector (not just Y axis)
+      const pushDistance = overlapY + 3; // Extra buffer for clean separation
+      ballState.x += nx * pushDistance;
+      ballState.y += ny * pushDistance;
     }
     
     // Only count hit if cooldown has passed (prevent multiple hits in one contact)
@@ -126,6 +167,7 @@ function handlePaddleCollision(playerId, playerData) {
       lastPaddleHit = playerId;
       paddleHitCooldown[playerId] = true; // Set cooldown
       floorHitCount = 0; // Reset floor hit counter on successful paddle hit
+      consecutivePaddleBounces++; // Increment bounce counter for damping tracking
       io.emit('paddleHit'); // Emit event to play paddle hit sound on all clients
     }
   } else {
@@ -191,6 +233,7 @@ const gameLoopInterval = setInterval(() => {
       ballState.vy = 0.3;
       lastPaddleHit = null;
       paddleHitCooldown = {}; // Reset all paddle cooldowns
+      consecutivePaddleBounces = 0; // Reset bounce counter on floor hit
       floorHitCount++; // Increment floor hit counter
       
       // Reset all combos after 5 floor hits
@@ -229,6 +272,7 @@ const gameLoopInterval = setInterval(() => {
     ballState.vy = spawnVel.vy;
     lastPaddleHit = null;
     paddleHitCooldown = {}; // Reset all paddle cooldowns
+    consecutivePaddleBounces = 0; // Reset bounce counter on goal
     randomizeGoalY();
     io.emit('goalYUpdate', goalY);
     io.emit('comboUpdate', combos); // Broadcast combo counts
@@ -273,6 +317,21 @@ io.on('connection', (socket) => {
             players[socket.id].x = data.x;
             players[socket.id].y = data.y;
             players[socket.id].paddleRotation = data.paddleRotation;
+            
+            // Buffer state for interpolation
+            if (!playerStates[socket.id]) {
+              playerStates[socket.id] = [];
+            }
+            playerStates[socket.id].push({
+              x: data.x,
+              y: data.y,
+              paddleRotation: data.paddleRotation,
+              timestamp: data.timestamp || Date.now(),
+            });
+            // Keep only last STATE_BUFFER_SIZE entries
+            if (playerStates[socket.id].length > STATE_BUFFER_SIZE) {
+              playerStates[socket.id].shift();
+            }
 
             // Broadcast the updated player info to all clients
             io.emit('playerUpdate', players[socket.id]);
@@ -287,6 +346,7 @@ io.on('connection', (socket) => {
         
         // Remove the player from the list of players
         delete players[socket.id];
+        delete playerStates[socket.id]; // Clean up interpolation buffer
 
         // Remove their score and combo
         delete scores[socket.id];

@@ -83,6 +83,8 @@
       let paddleHitCooldown = false; // Cooldown for paddle hit sound
       let audioReady = false; // Tracks if AudioContext has been resumed
       let lastScore = 0; // Track last known score to gate goal sound
+      let lastBallUpdate = { x: 400, y: 250, vx: 5, vy: 2 }; // Track last ball state for interpolation
+      let lastBallUpdateTime = Date.now(); // Timestamp of last ball update
 
       // Resume the AudioContext on first user gesture to satisfy browser autoplay policy
       function resumeAudioContextOnce() {
@@ -332,15 +334,20 @@
         // Display game entities
         fill(255);
         // Draw the ball
-        ellipse(ballData.x, ballData.y, 30); // Draw the main circle
+        // Interpolate ball position based on time since last update for smoother motion
+        const timeSinceUpdate = Math.min((Date.now() - lastBallUpdateTime) / 16.67, 1); // Cap at one frame
+        const interpolatedBallX = lastBallUpdate.x + (ballData.x - lastBallUpdate.x) * timeSinceUpdate;
+        const interpolatedBallY = lastBallUpdate.y + (ballData.y - lastBallUpdate.y) * timeSinceUpdate;
+        
+        ellipse(interpolatedBallX, interpolatedBallY, 30); // Draw the main circle
 
         // Draw a small line on the edge of the circle to show rotation
         let radius = 15; // Half the diameter of the ball
         let indicatorLength = 10;
         // Draw indicator based on velocity direction
         let angle = Math.atan2(ballData.vy, ballData.vx);
-        let endX = ballData.x + (radius + indicatorLength / 2) * cos(angle);
-        let endY = ballData.y + (radius + indicatorLength / 2) * sin(angle);
+        let endX = interpolatedBallX + (radius + indicatorLength / 2) * cos(angle);
+        let endY = interpolatedBallY + (radius + indicatorLength / 2) * sin(angle);
 
         // Draw the indicator line
         stroke(255, 0, 0); // Red color for visibility
@@ -360,7 +367,7 @@
         if (playerColors[playerId]) {
           fill(playerColors[playerId].paddleColor);
         }
-        rect(-45, -8, 90, 16); // Centered rectangle, height 16
+        rect(-45, -7.5, 90, 15); // Centered rectangle, height 15 (matches server collision)
         pop();
 
         // Draw remote players and their paddles
@@ -379,7 +386,7 @@
             if (playerColors[id]) {
               fill(playerColors[id].paddleColor);
             }
-            rect(-45, -8, 90, 16); // Centered rectangle, height 16
+            rect(-45, -7.5, 90, 15); // Centered rectangle, height 15 (matches server collision)
             pop();
           }
         });
@@ -418,7 +425,7 @@
       // Physics and collision detection handled entirely by server
       // Client-side bodies are for rendering only
 
-      // Send player position and paddle rotation
+      // Send player position and paddle rotation (every 33ms = 60fps, matching server)
       setInterval(() => {
         if (player && player.position && paddle && paddle.angle !== undefined) {
           let playerData = {
@@ -426,10 +433,11 @@
             x: player.position.x,
             y: player.position.y,
             paddleRotation: paddle.angle,
+            timestamp: Date.now(), // Add timestamp for server interpolation
           };
           socket.emit("playerUpdate", playerData);
         }
-      }, 50);
+      }, 33);
 
       // Receive updates from other players
       socket.on("playerUpdate", (data) => {
@@ -455,6 +463,14 @@
 
       // Server controls ball physics - all clients receive ballUpdate
       socket.on("ballUpdate", (data) => {
+        // Check if ball was reset (large distance change = reset)
+        const distSq = (data.x - ballData.x) ** 2 + (data.y - ballData.y) ** 2;
+        const isReset = distSq > 150000; // ~387 pixel distance threshold
+        
+        if (!isReset) {
+          lastBallUpdate = { x: ballData.x, y: ballData.y, vx: ballData.vx, vy: ballData.vy };
+        }
+        lastBallUpdateTime = Date.now();
         ballData.x = data.x;
         ballData.y = data.y;
         ballData.vx = data.vx;
