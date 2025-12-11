@@ -105,11 +105,9 @@
 
       function preload() {
         // Try to load goal sound, but don't break if it fails
-        // Note need to fix sound, Dont think I imported it right, but game works without it with the catch
         try {
           goalSound = loadSound('Sounds/video-game-bonus-323603.mp3');
           paddleHitSound = loadSound('Sounds/tennis-ball-hit-386155.mp3');
-          // Tame volumes to avoid loud bursts
           goalSound.setVolume(0.25);
           paddleHitSound.setVolume(0.2);
         } catch (e) {
@@ -319,7 +317,7 @@
         
         // Update player position locally
         if (moveDir !== 0) {
-          const newX = player.position.x + moveDir * 2.25; // 25% slower
+          const newX = player.position.x + moveDir * 3; // Move speed (2.5 pixels per frame) 
           // Clamp to canvas bounds
           Body.setPosition(player, { 
             x: constrain(newX, 30, CANVASX - 30), 
@@ -336,8 +334,7 @@
         // Manual paddle angle control (deterministic and responsive)
         const dt = typeof deltaTime !== 'undefined' ? deltaTime : 16.6667;
         const frameScale = dt / 16.6667;
-        const ROT_SPEED = 0.008; // radians per frame at 60fps (slower for precision)
-
+        const ROT_SPEED = 0.08; // rotation speed
         // initialize paddleAngle if missing
         if (typeof paddleAngle === 'undefined') {
           paddleAngle = paddle.angle || 0;

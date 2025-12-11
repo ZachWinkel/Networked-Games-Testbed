@@ -66,8 +66,8 @@ const STATE_BUFFER_SIZE = 3; // Keep last 3 updates for interpolation
 
 // Helper function to get randomized spawn velocity
 function getRandomSpawnVelocity() {
-  const speed = 2.2 + Math.random() * 0.6; // Random speed between 2.2 and 2.8
-  const angle = Math.random() * 0.2 - 0.05; // Random angle between -0.05 and 0.15 radians (more right-facing)
+  const speed = 3.5 + Math.random() * 1.5; // Random speed between 3.5 and 5.0
+  const angle = Math.random() * 0.8 - 0.4; // Random angle between -0.4 and 0.4 radians (wider variation)
   return {
     vx: speed * Math.cos(angle),
     vy: speed * Math.sin(angle)
@@ -87,7 +87,7 @@ let hitCounter = 0; // Track rally/hit count
 let floorHitCount = 0; // Track consecutive floor hits
 
 function randomizeGoalY() {
-  goalY = 150 + Math.random() * 200;
+  goalY = 100 + Math.random() * 200;// Random Y between 150 and 350
 }
 
 // Interpolate paddle state based on timestamp
@@ -250,6 +250,8 @@ const gameLoopInterval = setInterval(() => {
           combos[id] = 0;
         });
         io.emit('comboUpdate', combos); // Broadcast combo reset
+        io.emit('hitCounterReset'); // Reset hit counter when combos are lost
+        hitCounter = 0; // Reset hit counter
         floorHitCount = 0; // Reset floor hit counter
       }
     }
@@ -284,6 +286,7 @@ const gameLoopInterval = setInterval(() => {
     ballState.vy = spawnVel.vy;
     lastPaddleHit = null;
     paddleHitCooldown = {}; // Reset all paddle cooldowns
+    floorHitCount = 0; // Reset floor hit counter after goal
     randomizeGoalY();
     io.emit('goalYUpdate', goalY);
     io.emit('comboUpdate', combos); // Broadcast combo counts
