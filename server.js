@@ -176,7 +176,6 @@ function handlePaddleCollision(playerId, playerData) {
       hitCounter++; // Increment hit counter on paddle collision
       lastPaddleHit = playerId;
       paddleHitCooldown[playerId] = true; // Set cooldown
-      floorHitCount = 0; // Reset floor hit counter on successful paddle hit
       io.emit('paddleHit'); // Emit event to play paddle hit sound on all clients
     }
   } else {
