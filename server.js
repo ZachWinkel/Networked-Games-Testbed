@@ -193,7 +193,7 @@ const gameLoopInterval = setInterval(() => {
   const gravityTotal = 0.18; // overall gravity per frame (a bit faster fall)
   const gravityPerStep = gravityTotal / substeps;
   const airDrag = 1.0; // No air drag to preserve momentum from paddles
-  const maxSpeed = 9.5; // clamp to avoid tunneling and runaway speed
+  const maxSpeed = 9; // clamp to avoid tunneling and runaway speed
   
   for (let i = 0; i < substeps; i++) {
     // Apply gravity for this substep
@@ -355,6 +355,14 @@ io.on('connection', (socket) => {
             // Broadcast the updated player info to all clients
             io.emit('playerUpdate', players[socket.id]);
         }
+    });
+
+    // Handle player name updates
+    socket.on('playerName', (data) => {
+      if (data.id && data.name) {
+        // Broadcast name to all clients
+        io.emit('playerName', { id: data.id, name: data.name.substring(0, 20) });
+      }
     });
 
     // Old ball update handler removed - server now controls ball physics

@@ -73,11 +73,12 @@
       let goalY = 250;
       let players = {};
       let playerId = null;
+      let playerNames = {}; // Track player names
       let playerColors = {};      // Ball data from server (not a Matter.js body)
       let ballData = { x: 400, y: 250, vx: 5, vy: 2 };
       let paddleAngle = 0;
-      const MIN_PADDLE_ANGLE = -1.2;
-      const MAX_PADDLE_ANGLE = 1.2;
+      const MIN_PADDLE_ANGLE = -0.95;
+      const MAX_PADDLE_ANGLE = 0.95;
       let hitCounter = 0; // Track hits/rally
       let combos = {}; // Track combo count per player
       let lastPointsEarned = 0; // Display last points earned
@@ -118,6 +119,14 @@
 
       socket.on('connect', () => { 
         playerId = socket.id;
+        // Prompt for player name
+        let playerName = prompt('Enter your name');
+        if (!playerName || playerName.trim() === '') {
+          playerName = 'User' + Math.floor(Math.random() * 10000); // Default: User + random number
+        }
+        playerNames[playerId] = playerName.substring(0, 20); // Limit to 20 chars
+        // Send name to server
+        socket.emit('playerName', { id: playerId, name: playerNames[playerId] });
         // Generate random colors for the player after connection
         playerColors[playerId] = {
           bodyColor: color(random(50, 200), random(50, 200), random(50, 200)),
@@ -253,6 +262,13 @@
         }
       });
 
+      // Listen for player names from other players
+      socket.on('playerName', (data) => {
+        if (data.id && data.name) {
+          playerNames[data.id] = data.name.substring(0, 20);
+        }
+      });
+
       // New player joined
       socket.on('newPlayer', (pd) => {
         if (pd && pd.id && pd.id !== playerId) {
@@ -320,7 +336,7 @@
         // Manual paddle angle control (deterministic and responsive)
         const dt = typeof deltaTime !== 'undefined' ? deltaTime : 16.6667;
         const frameScale = dt / 16.6667;
-        const ROT_SPEED = 0.05; // radians per frame at 60fps (slower for precision)
+        const ROT_SPEED = 0.008; // radians per frame at 60fps (slower for precision)
 
         // initialize paddleAngle if missing
         if (typeof paddleAngle === 'undefined') {
@@ -370,6 +386,15 @@
           fill(playerColors[playerId].bodyColor);
         }
         ellipse(player.position.x, player.position.y, 50, 50); // Draw player
+        
+        // Draw player name on the circle
+        fill(0); // Black text
+        textSize(12);
+        textAlign(CENTER, CENTER);
+        text(playerNames[playerId] || 'User', player.position.x, player.position.y);
+        textSize(14);
+        textAlign(LEFT);
+        
         // Draw paddle with rotation applied
         push();
         translate(paddle.position.x, paddle.position.y);
@@ -389,6 +414,14 @@
               fill(playerColors[id].bodyColor);
             }
             ellipse(p.body.position.x, p.body.position.y, 50, 50);
+            
+            // Draw remote player name on the circle
+            fill(0); // Black text
+            textSize(12);
+            textAlign(CENTER, CENTER);
+            text(playerNames[id] || 'User', p.body.position.x, p.body.position.y);
+            textSize(14);
+            textAlign(LEFT);
             // Draw remote player paddle with rotation
             push();
             translate(p.paddle.position.x, p.paddle.position.y);
